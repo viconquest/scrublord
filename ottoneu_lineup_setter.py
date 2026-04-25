@@ -13,9 +13,11 @@ Requirements:
     pip install requests beautifulsoup4 scipy numpy
 """
 
+from __future__ import annotations
 import os
 import re
 import sys
+import urllib.parse
 import json
 import math
 import logging
@@ -75,8 +77,8 @@ BALLPARKS = {
 # ─────────────────────────────────────────────
 # CONFIGURATION — fill these in
 # ─────────────────────────────────────────────
-OTTONEU_USERNAME = os.environ.get("OTTONEU_USER", "YOUR_USERNAME")
-OTTONEU_PASSWORD = os.environ.get("OTTONEU_PASS", "YOUR_PASSWORD")
+OTTONEU_USERNAME = os.environ.get("OTTONEU_USER", "viconquest")
+OTTONEU_PASSWORD = os.environ.get("OTTONEU_PASS", "smileyl")
 LEAGUE_ID = "502"
 
 # Wind adjustment settings
@@ -219,7 +221,7 @@ def fetch_roster(session: requests.Session) -> list[dict]:
         pos_text = ""
         for cell in cells:
             txt = cell.get_text(strip=True)
-            if re.match(r"^(C|1B|2B|3B|SS|OF|SP|RP|MI|P)[\s/,]*(C|1B|2B|3B|SS|OF|SP|RP|MI|P)*$", txt):
+            if re.match(r"^(?:(?:C|1B|2B|3B|SS|OF|SP|RP|MI|P)[/,\s]*)+$", txt):
                 pos_text = txt
                 break
 
@@ -699,7 +701,7 @@ def resolve_batter_mlb_ids(players: list[dict]) -> list[dict]:
         # MLB Stats API: search by full name
         search_url = (
             f"https://statsapi.mlb.com/api/v1/people/search"
-            f"?names={requests.utils.quote(name)}&sportId=1"
+            f"?names={urllib.parse.quote(name)}&sportId=1"
         )
         try:
             r = requests.get(search_url, timeout=6)
@@ -797,7 +799,7 @@ def apply_matchup_adjustments(
 # ─────────────────────────────────────────────
 # STEP 5: Optimize lineup (ILP via greedy + scipy)
 # ─────────────────────────────────────────────
-def optimize_lineup(players: list[dict]) -> dict[str, list[dict]]:
+def optimize_lineup(players: list[dict]) -> dict[str, dict]:
     """
     Assign players to lineup slots to maximize total projected points.
 
