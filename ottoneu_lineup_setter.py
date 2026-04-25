@@ -14,9 +14,11 @@ Requirements:
 """
 
 from __future__ import annotations
+from __future__ import annotations
 import os
 import re
 import sys
+import urllib.parse
 import urllib.parse
 import json
 import math
@@ -141,37 +143,47 @@ log = logging.getLogger(__name__)
 # STEP 1: Log into Ottoneu
 # ─────────────────────────────────────────────
 def get_session() -> requests.Session:
-    """Authenticate with Ottoneu and return an active session."""
+    """Authenticate with Ottoneu via FanGraphs WordPress login."""
     session = requests.Session()
     session.headers["User-Agent"] = (
-        "Mozilla/5.0 (compatible; OttoneuLineupBot/1.0)"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    login_url = "https://ottoneu.fangraphs.com/login"
-    r = session.get(login_url)
+    redirect_to = f"https://ottoneu.fangraphs.com/{LEAGUE_ID}/team"
+    login_url = "https://www.fangraphs.com/blogs/wp-login.php"
+
+    # GET the login page to pick up any cookies / nonce values
+    r = session.get(login_url, params={"redirect_to": redirect_to})
     r.raise_for_status()
 
+    # Parse hidden fields from the WP login form (e.g. testcookie, _wpnonce)
     soup = BeautifulSoup(r.text, "html.parser")
-    csrf = soup.find("input", {"name": "_csrf_token"})
-    if not csrf:
-        # Try alternate token field names
-        csrf = soup.find("input", {"name": "csrf_token"}) or \
-               soup.find("input", {"name": "_token"})
+    login_form = soup.find("form", {"id": "loginform"}) or soup.find("form")
 
     payload = {
-        "_username": OTTONEU_USERNAME,
-        "_password": OTTONEU_PASSWORD,
-        "_remember_me": "on",
+        "log": OTTONEU_USERNAME,
+        "pwd": OTTONEU_PASSWORD,
+        "rememberme": "forever",
+        "redirect_to": redirect_to,
+        "wp-submit": "Log In",
+        "testcookie": "1",
     }
-    if csrf:
-        payload[csrf["name"]] = csrf["value"]
+
+    # Carry over any hidden inputs the form provides
+    if login_form:
+        for inp in login_form.find_all("input", {"type": "hidden"}):
+            name = inp.get("name")
+            if name and name not in payload:
+                payload[name] = inp.get("value", "")
 
     r2 = session.post(login_url, data=payload, allow_redirects=True)
     r2.raise_for_status()
 
-    if "login" in r2.url.lower() or "invalid" in r2.text.lower():
+    if "wp-login.php" in r2.url and "redirect_to" in r2.url:
         raise RuntimeError(
-            "Login failed — check OTTONEU_USER and OTTONEU_PASS env vars."
+            "Login failed — check OTTONEU_USER and OTTONEU_PASS env vars "
+            "(these are your FanGraphs credentials)."
         )
 
     log.info("Logged in as %s", OTTONEU_USERNAME)
@@ -186,7 +198,7 @@ def fetch_roster(session: requests.Session) -> list[dict]:
     Pull roster from Ottoneu. Each player dict includes:
       id, name, positions (list), projected_points, team_abbrev
     """
-    url = f"https://ottoneu.fangraphs.com/{LEAGUE_ID}/lineup"
+    url = f"https://ottoneu.fangraphs.com/{LEAGUE_ID}/team"
     r = session.get(url)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
@@ -873,7 +885,7 @@ def set_lineup(session: requests.Session, assignment: dict[str, dict]):
     Ottoneu's lineup page accepts a form POST with player_id → slot mappings.
     The exact field names are scraped from the current lineup form.
     """
-    url = f"https://ottoneu.fangraphs.com/{LEAGUE_ID}/lineup"
+    url = f"https://ottoneu.fangraphs.com/{LEAGUE_ID}/team"
 
     # GET the lineup page to find the form structure and CSRF token
     r = session.get(url)
